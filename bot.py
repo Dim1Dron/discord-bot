@@ -157,6 +157,8 @@ async def connect(ctx):
 
 @bot.command()
 async def disconnect(ctx):
+    global is_connecting
+    is_connecting = False
     if ctx.voice_client is not None:
         await ctx.voice_client.disconnect()
         await ctx.send("Бот отключился от голосового канала.", delete_after=5)
