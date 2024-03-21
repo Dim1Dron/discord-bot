@@ -1,6 +1,8 @@
 import discord
 from discord.ext import commands
 import asyncio
+from gtts import gTTS
+import os
 
 intents = discord.Intents.default()
 intents.voice_states = True
@@ -11,19 +13,21 @@ bot = commands.Bot(command_prefix='!', intents=intents)
 # Переменная для хранения последних сообщений пользователей
 last_messages = {}
 
+is_connecting = False  # Переменная для хранения состояния подключения
+
 # ID вашего голосового канала
 VOICE_CHANNEL_ID = 987767082311639040
 
 # Словарь, где ключ - ID роли, значение - путь к аудио файлу
 AUDIO_FILES = {
-    1218551819781935144: 'bubilda.mp3',#Бубылда
-    1218535348787871764: 'tushenka.mp3',#Шарит за тушенку
-    1218555326354427904: 'old.mp3',#Роулинг стоун 18+
-    1218555477634322483: 'talant.mp3',#7к урона на АМ
-    1218536084804341840: 'antena.mp3',#Антена
-    1218944612895428678: 'biznes.mp3',#Шарит за макароны
-    1218555789921489037: 'chuvaki.mp3',#Кентафарик
-    1218534644694122606: 'sosoch.mp3',#Купил за 5к
+    1218551819781935144: 'bubilda.mp3',  # Бубылда
+    1218535348787871764: 'tushenka.mp3',  # Шарит за тушенку
+    1218555326354427904: 'old.mp3',  # Роулинг стоун 18+
+    1218555477634322483: 'talant.mp3',  # 7к урона на АМ
+    1218536084804341840: 'antena.mp3',  # Антена
+    1218944612895428678: 'biznes.mp3',  # Шарит за макароны
+    1218555789921489037: 'chuvaki.mp3',  # Кентафарик
+    1218534644694122606: 'sosoch.mp3',  # Купил за 5к
 }
 
 @bot.event
@@ -34,6 +38,9 @@ async def on_ready():
 # Команда для воспроизведения радио
 @bot.command()
 async def radio(ctx):
+    if is_connecting:  # Проверяем, выполняется ли процесс подключения
+        await ctx.send('Не канает фраер, бот сейчас пиздит', delete_after=5)
+        return
     if ctx.voice_client:  # Проверяем, подключен ли бот к голосовому каналу
         if ctx.voice_client.channel.id != VOICE_CHANNEL_ID:  # Проверяем, является ли текущий канал нужным для включения радио
             await ctx.send("Бот уже находится в другом голосовом канале.", delete_after=5)  # Удаление сообщения через 5 секунд
@@ -61,6 +68,9 @@ async def radio(ctx):
 
 @bot.command()
 async def stop(ctx):
+    if is_connecting:  # Проверяем, выполняется ли процесс подключения
+        await ctx.send('Не канает фраер, бот сейчас пиздит', delete_after=5)
+        return
     if ctx.voice_client is not None:
         await ctx.voice_client.disconnect()
         await ctx.send("Бот отключился от голосового канала.", delete_after=5)
@@ -132,5 +142,58 @@ async def play_audio(member, audio_file):
     else:
         print("Пользователь не находится в голосовом канале.", delete_after=5)
 
+@bot.command()
+async def connect(ctx):
+    global is_connecting
+    if ctx.voice_client is None and not is_connecting:  # Проверяем, не подключен ли уже бот к голосовому каналу и не выполняется ли уже процесс подключения
+        is_connecting = True  # Устанавливаем флаг активного подключения
+        channel = ctx.author.voice.channel
+        if channel:
+            vc = await channel.connect()
+            await ctx.send(f'Присоединился к каналу: {channel.name}')
+            await setup_text_to_speech(ctx.guild)
+    else:
+        await ctx.send('Бот уже подключен к голосовому каналу или уже выполняется процесс подключения.', delete_after=5)
+
+@bot.command()
+async def disconnect(ctx):
+    if ctx.voice_client is not None:
+        await ctx.voice_client.disconnect()
+        await ctx.send("Бот отключился от голосового канала.", delete_after=5)
+        await teardown_text_to_speech(ctx.guild)  # Вызываем функцию для удаления обработчика текста
+        # Очищаем текстовый канал
+        text_channel = ctx.guild.get_channel(1216983595844112454)  # ID вашего текстового канала
+        if text_channel:
+            await text_channel.purge()
+            await ctx.send("Текстовый канал был очищен.", delete_after=5)
+        else:
+            await ctx.send("Указанный текстовый канал не найден.", delete_after=5)
+
+async def setup_text_to_speech(guild):
+    # Обработка текстового канала для преобразования текста в голос
+    text_channel_id = 1216983595844112454  # ID вашего текстового канала для чтения сообщений
+    text_channel = guild.get_channel(text_channel_id)
+    if text_channel:
+        bot.add_listener(on_text_message, 'on_message')
+        print(f"Бот начал слушать текстовый канал: {text_channel.name}")
+    else:
+        print("Указанный текстовый канал не найден.")
+
+async def teardown_text_to_speech(guild):
+    # Отключение обработки текста для преобразования в голос
+    bot.remove_listener(on_text_message, 'on_message')
+    print("Бот прекратил преобразование текста в голос.")
+
+async def on_text_message(message):
+    # Преобразование текста в голос и воспроизведение в голосовом канале
+    if message.author != bot.user and isinstance(message.channel, discord.TextChannel):
+        tts = gTTS(text=message.content, lang='ru')
+        tts.save("text-to-speech.mp3")
+        voice_channel = bot.voice_clients[0] if bot.voice_clients else None
+        if voice_channel and voice_channel.is_connected():
+            voice_source = discord.FFmpegPCMAudio("text-to-speech.mp3", options="-filter:a \"atempo=1.3\"")
+            voice_channel.play(voice_source)
+        else:
+            print("Бот не подключен к голосовому каналу.")
 
 bot.run('MTE1NjkxMzM3Mzk5MzIzODY0MA.Gdz5E0.v63RLSgEW54AvGDBuEqPEGFxSTSBqobzqsPU1U')
